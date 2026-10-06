@@ -7,13 +7,24 @@ const fallbackSupabaseUrl = "https://kqdhboohqqimrwbksemm.supabase.co";
 const fallbackAnonKey =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtxZGhib29ocXFpbXJ3YmtzZW1tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyNTc4NzMsImV4cCI6MjEwNjgzMzg3M30.XTTSoZ4oejA8v4T1s_cU4Zwhow5YvVPk1o0SBL4ptxQ";
 
-if (import.meta.env.DEV && (!configuredSupabaseUrl || !configuredAnonKey)) {
+function isValidSupabaseUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && parsed.hostname.endsWith(".supabase.co");
+  } catch {
+    return false;
+  }
+}
+
+if (import.meta.env.DEV && (!isValidSupabaseUrl(configuredSupabaseUrl) || !configuredAnonKey)) {
   console.warn(
-    "Supabase Vite environment variables are missing; using the configured public project fallback.",
+    "Supabase Vite environment variables are missing or invalid; using the configured public project fallback.",
   );
 }
 
-export const supabaseUrl = configuredSupabaseUrl || fallbackSupabaseUrl;
+export const supabaseUrl = isValidSupabaseUrl(configuredSupabaseUrl)
+  ? configuredSupabaseUrl
+  : fallbackSupabaseUrl;
 export const publicAnonKey = configuredAnonKey || fallbackAnonKey;
 
 const normalizedSupabaseUrl = supabaseUrl.replace(/\/+$/, "");
