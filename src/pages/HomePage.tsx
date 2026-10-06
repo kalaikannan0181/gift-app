@@ -199,6 +199,10 @@ function CircularGallery({
                 <img
                   src={item.url}
                   alt={item.title}
+                  width={340}
+                  height={440}
+                  loading="lazy"
+                  decoding="async"
                   onError={(e) => {
                     const fallback = defaultGalleryItems[index % defaultGalleryItems.length]?.url;
                     if (fallback && e.currentTarget.src !== fallback) {
@@ -557,7 +561,7 @@ export default function App() {
           key={audioUrl}
           ref={audioRef}
           src={audioUrl}
-          preload="metadata"
+          preload="none"
           onEnded={() => {
             setIsPlaying(false);
             setIsAudioBuffering(false);
@@ -704,7 +708,7 @@ export default function App() {
                   controls
                   autoPlay
                   playsInline
-                  preload="metadata"
+                  preload="none"
                   onLoadStart={() => setIsVideoBuffering(true)}
                   onWaiting={() => setIsVideoBuffering(true)}
                   onSeeking={() => setIsVideoBuffering(true)}

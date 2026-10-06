@@ -1,10 +1,14 @@
 {
-  "description": "Showcase your music with a sleek dark-mode landing page featuring an interactive audio player, vibrant visuals, and easy navigation for fans and artists.",
+  "title": "DJoz | Official Music Artist Landing & Discography",
+  "description": "DJoz is the official home for the artist's latest music, releases, live visuals, and gallery moments.",
   "robots": {
-    "index": false
+    "index": true
   },
   "accessibility": {
     "addBypassLinks": false,
     "ignoreReducedMotion": false
+  },
+  "icons": {
+    "icon": "/favicon.svg"
   }
 }

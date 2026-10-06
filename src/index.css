@@ -1,11 +1,12 @@
-@import url("https://fonts.googleapis.com/css2?family=Great+Vibes&family=Inter:wght@300;400;500;600;700&display=swap");
 @import "tailwindcss";
 
 :root {
-  font-family: "Inter", sans-serif;
+  font-family: "Inter", "Segoe UI", sans-serif;
   color-scheme: dark;
   background: #180126;
   font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern" 1;
 }
 
 * {
