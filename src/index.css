@@ -976,7 +976,7 @@ button {
 .admin-stats {
   display: grid;
   margin-top: 34px;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1118,6 +1118,13 @@ button {
   font: inherit;
   font-size: 11px;
   transition: all 0.2s ease;
+}
+
+.admin-field input[type="file"] {
+  height: auto;
+  min-height: 42px;
+  padding-block: 10px;
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .admin-field input::placeholder {
@@ -1629,6 +1636,204 @@ button {
   text-transform: uppercase;
 }
 
+.admin-memory-copy .admin-clear-button {
+  margin-top: 12px;
+}
+
+.admin-memory-edit {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.admin-memory-edit .admin-field > span {
+  font-size: 8px;
+}
+
+.admin-memory-edit .admin-field input {
+  height: 36px;
+  font-size: 10px;
+}
+
+.admin-release-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.admin-release-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  background: rgba(5, 3, 8, 0.24);
+}
+
+.admin-release-row > img,
+.admin-release-art-placeholder {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 7px;
+  object-fit: cover;
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.admin-release-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.admin-release-copy strong,
+.admin-release-copy span,
+.admin-release-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-release-copy strong {
+  font-size: 11px;
+}
+
+.admin-release-copy span,
+.admin-release-copy small {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 9px;
+}
+
+.admin-release-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.admin-icon-action {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: rgba(255, 145, 165, 0.75);
+  background: transparent;
+}
+
+.admin-icon-action:hover:not(:disabled) {
+  border-color: rgba(255, 100, 130, 0.35);
+  color: #ff8ca3;
+}
+
+.admin-icon-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.admin-release-empty {
+  margin: 0;
+  padding: 15px 0;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 10px;
+}
+
+.discography-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.discography-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.discography-heading p {
+  margin: 0;
+  color: white;
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.discography-heading span {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+}
+
+.public-release-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
+  gap: 14px;
+}
+
+.public-release-card {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(9, 6, 15, 0.68);
+}
+
+.public-release-card > img,
+.public-release-art-placeholder {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  place-items: center;
+  object-fit: cover;
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.public-release-copy {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+}
+
+.public-release-copy p,
+.public-release-copy h2 {
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.public-release-copy p {
+  color: rgba(222, 146, 255, 0.82);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.public-release-copy h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.public-release-copy span {
+  color: rgba(255, 255, 255, 0.43);
+  font-size: 10px;
+}
+
+.public-release-copy a {
+  width: fit-content;
+  margin-top: 5px;
+  color: white;
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.discography-empty {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 12px;
+}
+
 .admin-empty {
   display: grid;
   min-height: 400px;
@@ -2113,6 +2318,10 @@ button {
 
   .admin-grid {
     grid-template-columns: 1fr;
+  }
+
+  .admin-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .admin-gallery-panel {

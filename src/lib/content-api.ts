@@ -34,13 +34,29 @@ export type { UploadProgressCallback, UploadProgressInfo } from "./storage-uploa
 export type SiteSettings = {
   audioUrl: string;
   videoUrl: string;
+  heroHeadline: string;
+  heroSubtitle: string;
   audioPath?: string;
   videoPath?: string;
 };
 
+export type DiscographyRelease = {
+  id: string;
+  releaseTitle: string;
+  trackTitle: string;
+  artist: string;
+  audioUrl: string;
+  releaseUrl: string;
+  coverArtUrl: string;
+  releasedAt: string;
+  sortOrder: number;
+};
+
 export type SiteContent = {
   gallery: GalleryItem[];
+  remoteGallery: GalleryItem[];
   settings: SiteSettings;
+  releases: DiscographyRelease[];
 };
 
 export type GalleryPhotoRow = {
@@ -52,6 +68,32 @@ export type GalleryPhotoRow = {
   photographer_name?: string | null;
   by?: string | null;
 };
+
+type DiscographyReleaseRow = {
+  id: string;
+  release_title: string;
+  track_title: string;
+  artist?: string | null;
+  audio_url?: string | null;
+  release_url?: string | null;
+  cover_art_url?: string | null;
+  released_at?: string | null;
+  sort_order?: number | null;
+};
+
+function discographyRowToRelease(row: DiscographyReleaseRow): DiscographyRelease {
+  return {
+    id: row.id,
+    releaseTitle: row.release_title,
+    trackTitle: row.track_title,
+    artist: row.artist || "DJoz",
+    audioUrl: row.audio_url || "",
+    releaseUrl: row.release_url || "",
+    coverArtUrl: row.cover_art_url || "",
+    releasedAt: row.released_at || "",
+    sortOrder: row.sort_order ?? 0,
+  };
+}
 
 export function galleryPhotoToItem(
   photo: GalleryPhotoRow,
@@ -92,29 +134,45 @@ export async function fetchSiteContent(): Promise<SiteContent> {
     audio_url?: string | null;
     background_music_url?: string | null;
     floating_video_url?: string | null;
+    hero_headline?: string | null;
+    hero_subtitle?: string | null;
   } | null = null;
+  let releases: DiscographyRelease[] = [];
 
-  try {
-    const [settingsResult, galleryResult] = await Promise.all([
-      supabase.from("site_settings").select("*").eq("id", 1).maybeSingle(),
-      supabase.from("gallery_photos").select("*"),
-    ]);
+  const [settingsResult, galleryResult, releaseResult] = await Promise.all([
+    supabase.from("site_settings").select("*").eq("id", 1).maybeSingle(),
+    supabase.from("gallery_photos").select("*"),
+    supabase
+      .from("discography_releases")
+      .select("*")
+      .order("sort_order", { ascending: true })
+      .order("released_at", { ascending: false }),
+  ]);
 
-    if (!galleryResult.error && Array.isArray(galleryResult.data)) {
-      cloudGallery = (galleryResult.data as GalleryPhotoRow[]).map((photo) =>
-        galleryPhotoToItem(photo),
-      );
-    }
+  if (settingsResult.error) throw settingsResult.error;
+  if (galleryResult.error) throw galleryResult.error;
+  if (releaseResult.error) throw releaseResult.error;
 
-    if (!settingsResult.error && settingsResult.data) {
-      cloudSettings = settingsResult.data as {
-        audio_url?: string | null;
-        background_music_url?: string | null;
-        floating_video_url?: string | null;
-      };
-    }
-  } catch (err) {
-    console.warn("Unable to fetch remote content from Supabase:", err);
+  if (Array.isArray(galleryResult.data)) {
+    cloudGallery = (galleryResult.data as GalleryPhotoRow[]).map((photo) =>
+      galleryPhotoToItem(photo),
+    );
+  }
+
+  if (settingsResult.data) {
+    cloudSettings = settingsResult.data as {
+      audio_url?: string | null;
+      background_music_url?: string | null;
+      floating_video_url?: string | null;
+      hero_headline?: string | null;
+      hero_subtitle?: string | null;
+    };
+  }
+
+  if (Array.isArray(releaseResult.data)) {
+    releases = (releaseResult.data as DiscographyReleaseRow[]).map(
+      discographyRowToRelease,
+    );
   }
 
   // Retrieve items from IndexedDB and localStorage
@@ -159,11 +217,104 @@ export async function fetchSiteContent(): Promise<SiteContent> {
 
   return {
     gallery: finalGallery,
+    remoteGallery: cloudGallery,
     settings: {
       audioUrl: audioUrl || DEFAULT_AUDIO_URL,
       videoUrl,
+      heroHeadline: cloudSettings?.hero_headline?.trim() || "Feel the heart beats",
+      heroSubtitle:
+        cloudSettings?.hero_subtitle?.trim() || "Let the rhythm move through you.",
     },
+    releases,
   };
+}
+
+export async function saveSiteSettings(settings: SiteSettings) {
+  const { data, error } = await supabase
+    .from("site_settings")
+    .upsert(
+      {
+        id: 1,
+        background_music_url: settings.audioUrl.trim(),
+        floating_video_url: settings.videoUrl.trim(),
+        hero_headline: settings.heroHeadline.trim(),
+        hero_subtitle: settings.heroSubtitle.trim(),
+      },
+      { onConflict: "id" },
+    )
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateGalleryItem(
+  id: string,
+  values: Pick<GalleryItem, "title" | "subtitle" | "by" | "url">,
+) {
+  const { data, error } = await supabase
+    .from("gallery_photos")
+    .update({
+      image_url: values.url.trim(),
+      title: values.title.trim(),
+      subtitle: values.subtitle.trim(),
+      photographer_name: values.by.trim(),
+    })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return galleryPhotoToItem(data as GalleryPhotoRow);
+}
+
+export type DiscographyReleaseInput = Omit<DiscographyRelease, "id"> & {
+  id?: string;
+};
+
+export async function saveDiscographyRelease(
+  release: DiscographyReleaseInput,
+) {
+  const values = {
+    release_title: release.releaseTitle.trim(),
+    track_title: release.trackTitle.trim(),
+    artist: release.artist.trim() || "DJoz",
+    audio_url: release.audioUrl.trim(),
+    release_url: release.releaseUrl.trim(),
+    cover_art_url: release.coverArtUrl.trim(),
+    released_at: release.releasedAt || null,
+    sort_order: release.sortOrder,
+  };
+  const query = release.id
+    ? supabase.from("discography_releases").update(values).eq("id", release.id)
+    : supabase.from("discography_releases").insert(values);
+  const { data, error } = await query.select("*").single();
+  if (error) throw error;
+  return discographyRowToRelease(data as DiscographyReleaseRow);
+}
+
+export async function deleteDiscographyRelease(id: string) {
+  const { error } = await supabase
+    .from("discography_releases")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function uploadReleaseAsset(
+  bucket: "music" | "photos",
+  file: File,
+) {
+  if (file.size > MAX_MEDIA_FILE_SIZE) {
+    throw new Error(`File exceeds the 500 MB limit (${formatBytes(file.size)}).`);
+  }
+  const objectPath = `${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, "_")}`;
+  const { publicUrl } = await uploadStorageMedia(bucket, file, {
+    objectPath,
+    contentType: file.type || undefined,
+    upsert: false,
+    cacheControl: "3600",
+  });
+  return publicUrl;
 }
 
 export async function uploadGalleryItem(formData: FormData): Promise<{ item: GalleryItem }> {
@@ -184,76 +335,49 @@ export async function uploadGalleryItem(formData: FormData): Promise<{ item: Gal
   // Optimize image for fast rendering and safe persistent storage
   const compressed = await compressImageFile(file);
 
-  let finalUrl = "";
+  const { data: upload, error: uploadError } = await supabase.storage
+    .from("photos")
+    .upload(objectPath, compressed.blob, {
+      contentType: "image/jpeg",
+      upsert: false,
+      cacheControl: "3600",
+    });
+  if (uploadError) throw uploadError;
 
-  // 1. Try uploading to Supabase Storage & Database
-  try {
-    const { data: upload, error: uploadError } = await supabase.storage
-      .from("photos")
-      .upload(objectPath, compressed.blob, {
-        contentType: "image/jpeg",
-        upsert: true,
-        cacheControl: "3600",
-      });
-
-    if (!uploadError && upload) {
-      const { data: publicUrlData } = supabase.storage
-        .from("photos")
-        .getPublicUrl(upload.path);
-
-      if (publicUrlData?.publicUrl) {
-        finalUrl = publicUrlData.publicUrl;
-        await supabase.from("gallery_photos").insert({
-          image_url: finalUrl,
-          title,
-          subtitle,
-          photographer_name: photographer,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn("Supabase photo upload encountered error, falling back to local storage:", err);
+  const { data: publicUrlData } = supabase.storage
+    .from("photos")
+    .getPublicUrl(upload.path);
+  if (!publicUrlData.publicUrl) {
+    throw new Error("Supabase Storage did not return a public image URL.");
   }
 
-  // 2. If cloud upload was not possible (e.g. RLS / offline), use local data/blob URL
-  if (!finalUrl) {
-    finalUrl = compressed.dataUrl || URL.createObjectURL(compressed.blob);
+  const { data: row, error: insertError } = await supabase
+    .from("gallery_photos")
+    .insert({
+      image_url: publicUrlData.publicUrl,
+      title,
+      subtitle,
+      photographer_name: photographer,
+    })
+    .select("*")
+    .single();
+  if (insertError) {
+    await supabase.storage.from("photos").remove([upload.path]);
+    throw insertError;
   }
 
-  const newItem: GalleryItem = {
-    id: `photo-${Date.now()}`,
-    title,
-    subtitle,
-    by: photographer,
-    url: finalUrl,
-  };
-
-  // 3. Save to IndexedDB (survives refreshes, full storage quota)
-  const savedItem = await saveGalleryItemToDB(newItem, compressed.blob);
-
-  // 4. Save to localStorage with quota protection
+  const item = galleryPhotoToItem(row as GalleryPhotoRow);
+  await saveGalleryItemToDB(item);
   const currentItems = getGalleryItems();
-  const updatedItems = [savedItem, ...currentItems.filter((item) => item.id !== savedItem.id)];
-  saveGalleryItems(updatedItems);
-
-  return { item: savedItem };
+  saveGalleryItems([item, ...currentItems.filter((existing) => existing.id !== item.id)]);
+  return { item };
 }
 
 export async function deleteGalleryItem(id: string) {
-  // Remove from IndexedDB
+  const { error } = await supabase.from("gallery_photos").delete().eq("id", id);
+  if (error) throw error;
   await deleteGalleryItemFromDB(id);
-
-  // Remove from local storage
-  const currentItems = getGalleryItems();
-  const updatedItems = currentItems.filter((photo) => photo.id !== id);
-  saveGalleryItems(updatedItems);
-
-  // Also try deleting from Supabase
-  try {
-    await supabase.from("gallery_photos").delete().eq("id", id);
-  } catch {
-    // Continue even if Supabase delete fails
-  }
+  saveGalleryItems(getGalleryItems().filter((photo) => photo.id !== id));
   return { success: true };
 }
 
@@ -283,23 +407,13 @@ export async function uploadMedia(
           ? "audio/wav"
           : "audio/ogg";
 
-    // 1. Save blob to IndexedDB so it's always locally accessible and persistent
-    const localDbUrl = await saveMediaSettingToDB("audio", "", file);
-
-    let publicUrl = "";
-    try {
-      const res = await uploadStorageMedia("music", file, {
-        objectPath: fileName,
-        contentType,
-        upsert: true,
-        cacheControl: "3600",
-        onProgress,
-      });
-      publicUrl = res.publicUrl;
-    } catch (storageErr) {
-      console.warn("Cloud storage upload failed, saving audio locally:", storageErr);
-      publicUrl = localDbUrl || URL.createObjectURL(file);
-    }
+    const { publicUrl } = await uploadStorageMedia("music", file, {
+      objectPath: fileName,
+      contentType,
+      upsert: true,
+      cacheControl: "3600",
+      onProgress,
+    });
 
     onProgress?.({
       percentage: 100,
@@ -309,21 +423,14 @@ export async function uploadMedia(
       total: file.size,
     });
 
-    const activeAudioUrl = publicUrl || localDbUrl;
+    const activeAudioUrl = publicUrl;
+    const { error: settingsError } = await supabase
+      .from("site_settings")
+      .update({ background_music_url: activeAudioUrl })
+      .eq("id", 1);
+    if (settingsError) throw settingsError;
     saveAudioUrl(activeAudioUrl);
-    await saveMediaSettingToDB("audio", activeAudioUrl, file);
-
-    try {
-      await supabase
-        .from("site_settings")
-        .update({
-          background_music_url: activeAudioUrl,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", 1);
-    } catch (dbErr) {
-      console.warn("Could not update site_settings table:", dbErr);
-    }
+    await saveMediaSettingToDB("audio", activeAudioUrl);
 
     onProgress?.({
       percentage: 100,
@@ -348,23 +455,13 @@ export async function uploadMedia(
     const contentType =
       file.type || (extension === "webm" ? "video/webm" : "video/mp4");
 
-    // 1. Save blob to IndexedDB so it's always locally accessible and persistent
-    const localDbUrl = await saveMediaSettingToDB("video", "", file);
-
-    let publicUrl = "";
-    try {
-      const res = await uploadStorageMedia("videos", file, {
-        objectPath,
-        contentType,
-        upsert: true,
-        cacheControl: "3600",
-        onProgress,
-      });
-      publicUrl = res.publicUrl;
-    } catch (storageErr) {
-      console.warn("Cloud storage upload failed, saving video locally:", storageErr);
-      publicUrl = localDbUrl || URL.createObjectURL(file);
-    }
+    const { publicUrl } = await uploadStorageMedia("videos", file, {
+      objectPath,
+      contentType,
+      upsert: true,
+      cacheControl: "3600",
+      onProgress,
+    });
 
     onProgress?.({
       percentage: 100,
@@ -374,21 +471,14 @@ export async function uploadMedia(
       total: file.size,
     });
 
-    const activeVideoUrl = publicUrl || localDbUrl;
+    const activeVideoUrl = publicUrl;
+    const { error: settingsError } = await supabase
+      .from("site_settings")
+      .update({ floating_video_url: activeVideoUrl })
+      .eq("id", 1);
+    if (settingsError) throw settingsError;
     saveVideoUrl(activeVideoUrl);
-    await saveMediaSettingToDB("video", activeVideoUrl, file);
-
-    try {
-      await supabase
-        .from("site_settings")
-        .update({
-          floating_video_url: activeVideoUrl,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", 1);
-    } catch (dbErr) {
-      console.warn("Could not update site_settings table:", dbErr);
-    }
+    await saveMediaSettingToDB("video", activeVideoUrl);
 
     onProgress?.({
       percentage: 100,

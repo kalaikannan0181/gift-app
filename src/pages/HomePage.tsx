@@ -8,7 +8,12 @@ import {
   defaultGalleryItems,
   type GalleryItem,
 } from "../lib/gallery-storage";
-import { fetchSiteContent, galleryPhotoToItem, type GalleryPhotoRow } from "../lib/content-api";
+import {
+  fetchSiteContent,
+  galleryPhotoToItem,
+  type DiscographyRelease,
+  type GalleryPhotoRow,
+} from "../lib/content-api";
 import { supabase } from "../lib/supabase";
 
 const navigation = [
@@ -244,6 +249,8 @@ function AudioPlayer({
   isBuffering,
   currentTime,
   duration,
+  trackTitle,
+  artistName,
   onPlayingChange,
   audioError,
 }: {
@@ -251,6 +258,8 @@ function AudioPlayer({
   isBuffering: boolean;
   currentTime: number;
   duration: number;
+  trackTitle: string;
+  artistName: string;
   onPlayingChange: (playing: boolean) => void;
   audioError: string;
 }) {
@@ -288,10 +297,10 @@ function AudioPlayer({
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-[14px] font-semibold tracking-[0.01em] text-white">
-              A sollicitudin ligula ornare
+              {trackTitle}
             </h2>
             <p className="mt-1 text-[11px] tracking-wide text-white/42">
-              Sit amet, consectetur
+              {artistName}
             </p>
           </div>
           <div className="flex gap-1">
@@ -406,21 +415,31 @@ export default function App() {
   const [audioError, setAudioError] = useState("");
   const [galleryItems, setGalleryItems] =
     useState<GalleryItem[]>(getGalleryItems);
+  const [releases, setReleases] = useState<DiscographyRelease[]>([]);
   const [audioUrl, setAudioUrl] = useState(getAudioUrl);
   const [videoUrl, setVideoUrl] = useState(getVideoUrl);
+  const [heroHeadline, setHeroHeadline] = useState("Feel the heart beats");
+  const [heroSubtitle, setHeroSubtitle] = useState("Let the rhythm move through you.");
   const [videoOpen, setVideoOpen] = useState(false);
   const [isVideoBuffering, setIsVideoBuffering] = useState(true);
   const [videoError, setVideoError] = useState("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const featuredRelease = releases[0];
+  const featuredAudioUrl = featuredRelease?.audioUrl || audioUrl;
 
   useEffect(() => {
     let active = true;
     let initialFetchComplete = false;
     let receivedMusicUpdate = false;
     let receivedVideoUpdate = false;
+    let receivedSettingsUpdate = false;
     const pendingGalleryChanges: Array<
-      | { type: "INSERT"; item: GalleryItem }
+      | { type: "UPSERT"; item: GalleryItem }
+      | { type: "DELETE"; id: string }
+    > = [];
+    const pendingReleaseChanges: Array<
+      | { type: "UPSERT"; release: DiscographyRelease }
       | { type: "DELETE"; id: string }
     > = [];
 
@@ -437,23 +456,32 @@ export default function App() {
         (payload) => {
           receivedMusicUpdate = true;
           receivedVideoUpdate = true;
+          receivedSettingsUpdate = true;
           const settings = payload.new as {
             background_music_url?: string | null;
             floating_video_url?: string | null;
+            hero_headline?: string | null;
+            hero_subtitle?: string | null;
           };
           setAudioUrl(normalizeAudioUrl(settings.background_music_url ?? ""));
           setAudioError("");
           setVideoUrl(settings.floating_video_url ?? "");
+          setHeroHeadline(settings.hero_headline?.trim() || "Feel the heart beats");
+          setHeroSubtitle(settings.hero_subtitle?.trim() || "Let the rhythm move through you.");
         },
       )
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "gallery_photos" },
+        { event: "*", schema: "public", table: "gallery_photos" },
         (payload) => {
-          const item = galleryPhotoToItem(payload.new as GalleryPhotoRow);
-          if (!initialFetchComplete) {
-            pendingGalleryChanges.push({ type: "INSERT", item });
+          if (payload.eventType === "DELETE") {
+            const id = String(payload.old.id);
+            if (!initialFetchComplete) pendingGalleryChanges.push({ type: "DELETE", id });
+            setGalleryItems((current) => current.filter((photo) => photo.id !== id));
+            return;
           }
+          const item = galleryPhotoToItem(payload.new as GalleryPhotoRow);
+          if (!initialFetchComplete) pendingGalleryChanges.push({ type: "UPSERT", item });
           setGalleryItems((current) => [
             item,
             ...current.filter((photo) => photo.id !== item.id),
@@ -462,13 +490,44 @@ export default function App() {
       )
       .on(
         "postgres_changes",
-        { event: "DELETE", schema: "public", table: "gallery_photos" },
+        { event: "*", schema: "public", table: "discography_releases" },
         (payload) => {
-          const id = String(payload.old.id);
-          if (!initialFetchComplete) {
-            pendingGalleryChanges.push({ type: "DELETE", id });
+          if (payload.eventType === "DELETE") {
+            const id = String(payload.old.id);
+            if (!initialFetchComplete) pendingReleaseChanges.push({ type: "DELETE", id });
+            setReleases((current) => current.filter((release) => release.id !== id));
+            return;
           }
-          setGalleryItems((current) => current.filter((photo) => photo.id !== id));
+          const row = payload.new as {
+            id: string;
+            release_title: string;
+            track_title: string;
+            artist?: string | null;
+            audio_url?: string | null;
+            release_url?: string | null;
+            cover_art_url?: string | null;
+            released_at?: string | null;
+            sort_order?: number | null;
+          };
+          const release: DiscographyRelease = {
+            id: row.id,
+            releaseTitle: row.release_title,
+            trackTitle: row.track_title,
+            artist: row.artist || "DJoz",
+            audioUrl: row.audio_url || "",
+            releaseUrl: row.release_url || "",
+            coverArtUrl: row.cover_art_url || "",
+            releasedAt: row.released_at || "",
+            sortOrder: row.sort_order ?? 0,
+          };
+          if (!initialFetchComplete) {
+            pendingReleaseChanges.push({ type: "UPSERT", release });
+          }
+          setReleases((current) =>
+            [release, ...current.filter((item) => item.id !== release.id)].sort(
+              (left, right) => left.sortOrder - right.sortOrder,
+            ),
+          );
         },
       )
       .subscribe();
@@ -480,7 +539,7 @@ export default function App() {
           ? content.gallery
           : getGalleryItems();
         for (const change of pendingGalleryChanges) {
-          if (change.type === "INSERT") {
+          if (change.type === "UPSERT") {
             initialGallery = [
               change.item,
               ...initialGallery.filter((photo) => photo.id !== change.item.id),
@@ -490,11 +549,27 @@ export default function App() {
           }
         }
         setGalleryItems(initialGallery);
+        let initialReleases = content.releases;
+        for (const change of pendingReleaseChanges) {
+          if (change.type === "UPSERT") {
+            initialReleases = [
+              change.release,
+              ...initialReleases.filter((item) => item.id !== change.release.id),
+            ];
+          } else {
+            initialReleases = initialReleases.filter((item) => item.id !== change.id);
+          }
+        }
+        setReleases(initialReleases.sort((left, right) => left.sortOrder - right.sortOrder));
         if (!receivedMusicUpdate) {
           setAudioUrl(normalizeAudioUrl(content.settings.audioUrl));
         }
         if (!receivedVideoUpdate) {
           setVideoUrl(content.settings.videoUrl || getVideoUrl());
+        }
+        if (!receivedSettingsUpdate) {
+          setHeroHeadline(content.settings.heroHeadline);
+          setHeroSubtitle(content.settings.heroSubtitle);
         }
       })
       .catch(() => {
@@ -512,7 +587,7 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const audio = audioRef.current;
-    if (!audioUrl) {
+    if (!featuredAudioUrl) {
       audio?.pause();
       setAudioError("");
       return;
@@ -536,11 +611,11 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [audioUrl, isPlaying]);
+  }, [featuredAudioUrl, isPlaying]);
 
   return (
     <main
-      className={`page-shell relative min-h-screen overflow-hidden text-white ${isPlaying ? "is-playing" : ""}`}
+      className={`page-shell relative min-h-screen overflow-x-hidden text-white ${isPlaying ? "is-playing" : ""}`}
     >
       <div className="ambient-glow ambient-glow-one" />
       <div className="ambient-glow ambient-glow-two" />
@@ -556,11 +631,11 @@ export default function App() {
       </div>
       <div className="noise" />
       <CircularGallery isPlaying={isPlaying} items={galleryItems} />
-      {audioUrl && (
+      {featuredAudioUrl && (
         <audio
-          key={audioUrl}
+          key={featuredAudioUrl}
           ref={audioRef}
-          src={audioUrl}
+          src={featuredAudioUrl}
           preload="none"
           onEnded={() => {
             setIsPlaying(false);
@@ -635,11 +710,10 @@ export default function App() {
       <div className="hero-content relative z-10 mx-auto flex w-full max-w-5xl flex-col items-center px-5 pb-10 pt-5 text-center sm:pt-9">
         <p className="eyebrow mb-1.5">New sounds - New emotion</p>
         <h1 className="hero-title text-[58px] leading-[1.05] sm:text-[78px] md:text-[92px]">
-          Feel the heart beats
+          {heroHeadline}
         </h1>
         <p className="mt-3 max-w-md text-[12px] leading-6 tracking-[0.035em] text-white/52 sm:text-[13px]">
-          Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-          <br className="hidden sm:block" /> Let the rhythm move through you.
+          {heroSubtitle}
         </p>
         <div className="mt-7 w-full sm:mt-8">
           <AudioPlayer
@@ -647,6 +721,8 @@ export default function App() {
             isBuffering={isAudioBuffering}
             currentTime={audioCurrentTime}
             duration={audioDuration}
+            trackTitle={featuredRelease?.trackTitle || "DJoz"}
+            artistName={featuredRelease?.artist || "Featured track"}
             audioError={audioError}
             onPlayingChange={(playing) => {
               setAudioError("");
@@ -655,6 +731,47 @@ export default function App() {
           />
         </div>
       </div>
+
+      <section className="discography-section relative z-10 mx-auto w-full max-w-6xl px-6 pb-28 pt-8 sm:px-10" id="discography">
+        <div className="discography-heading">
+          <p>Discography</p>
+          <span>Selected releases</span>
+        </div>
+        {releases.length ? (
+          <div className="public-release-grid">
+            {releases.map((release) => (
+              <article className="public-release-card" key={release.id}>
+                {release.coverArtUrl ? (
+                  <img
+                    src={release.coverArtUrl}
+                    alt={`${release.releaseTitle} cover artwork`}
+                    width={480}
+                    height={480}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <div className="public-release-art-placeholder" aria-hidden="true">
+                    <Icon name="music" className="h-8 w-8" />
+                  </div>
+                )}
+                <div className="public-release-copy">
+                  <p>{release.releaseTitle}</p>
+                  <h2>{release.trackTitle}</h2>
+                  <span>{release.artist}{release.releasedAt ? ` · ${release.releasedAt.slice(0, 4)}` : ""}</span>
+                  {release.releaseUrl && (
+                    <a href={release.releaseUrl} target="_blank" rel="noreferrer">
+                      Listen / buy ↗
+                    </a>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="discography-empty">New releases will appear here.</p>
+        )}
+      </section>
 
       <button
         className="floating-video-button"

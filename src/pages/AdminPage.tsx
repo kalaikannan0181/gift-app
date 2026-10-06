@@ -2,13 +2,19 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
 import {
   deleteGalleryItem,
+  deleteDiscographyRelease,
   fetchSiteContent,
+  saveDiscographyRelease,
+  saveSiteSettings,
+  updateGalleryItem,
+  uploadReleaseAsset,
   uploadGalleryItem,
   uploadMedia,
   formatBytes,
   formatUploadError,
   MAX_MEDIA_FILE_SIZE,
   type SiteSettings,
+  type DiscographyRelease,
   type UploadProgressInfo,
 } from "../lib/content-api";
 import type { GalleryItem } from "../lib/gallery-storage";
@@ -88,7 +94,35 @@ const icons = {
   ),
 };
 
-const emptySettings: SiteSettings = { audioUrl: "", videoUrl: "" };
+const emptySettings: SiteSettings = {
+  audioUrl: "",
+  videoUrl: "",
+  heroHeadline: "Feel the heart beats",
+  heroSubtitle: "Let the rhythm move through you.",
+};
+
+type ReleaseDraft = {
+  id?: string;
+  releaseTitle: string;
+  trackTitle: string;
+  artist: string;
+  audioUrl: string;
+  releaseUrl: string;
+  coverArtUrl: string;
+  releasedAt: string;
+  sortOrder: number;
+};
+
+const emptyReleaseDraft: ReleaseDraft = {
+  releaseTitle: "",
+  trackTitle: "",
+  artist: "DJoz",
+  audioUrl: "",
+  releaseUrl: "",
+  coverArtUrl: "",
+  releasedAt: "",
+  sortOrder: 0,
+};
 
 type NoticeState = {
   text: string;
@@ -102,6 +136,7 @@ type ActiveUploadProgress = UploadProgressInfo & {
 export default function AdminPage() {
   const navigate = useNavigate();
   const [photos, setPhotos] = useState<GalleryItem[]>(getGalleryItems);
+  const [releases, setReleases] = useState<DiscographyRelease[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(emptySettings);
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(true);
@@ -116,11 +151,119 @@ export default function AdminPage() {
   const [title, setTitle] = useState("");
   const [subtitle, setSubtitle] = useState("");
   const [photographer, setPhotographer] = useState("");
+  const [editingPhoto, setEditingPhoto] = useState<GalleryItem | null>(null);
+  const [releaseDraft, setReleaseDraft] = useState<ReleaseDraft>(emptyReleaseDraft);
   const [uploadProgress, setUploadProgress] =
     useState<ActiveUploadProgress | null>(null);
 
   const showNotice = (text: string, isError = false) => {
     setNotice({ text, isError });
+  };
+
+  const handleSettingsSave = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!settings.heroHeadline.trim() || !settings.heroSubtitle.trim()) {
+      showNotice("Hero headline and subtitle are required.", true);
+      return;
+    }
+    setBusy("settings");
+    try {
+      await saveSiteSettings(settings);
+      showNotice("Site settings saved and published.");
+    } catch (error) {
+      showNotice(
+        error instanceof Error ? error.message : "Unable to save site settings.",
+        true,
+      );
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleGallerySave = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editingPhoto) return;
+    setBusy(`gallery-${editingPhoto.id}`);
+    try {
+      const updated = await updateGalleryItem(editingPhoto.id, editingPhoto);
+      setPhotos((current) =>
+        current.map((photo) => (photo.id === updated.id ? updated : photo)),
+      );
+      setEditingPhoto(null);
+      showNotice("Gallery details updated.");
+    } catch (error) {
+      showNotice(
+        error instanceof Error ? error.message : "Unable to update gallery details.",
+        true,
+      );
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleReleaseAssetUpload = async (
+    kind: "audio" | "cover",
+    file: File | null,
+  ) => {
+    if (!file) return;
+    setBusy(`release-${kind}`);
+    try {
+      const url = await uploadReleaseAsset(kind === "audio" ? "music" : "photos", file);
+      setReleaseDraft((current) =>
+        kind === "audio"
+          ? { ...current, audioUrl: url }
+          : { ...current, coverArtUrl: url },
+      );
+      showNotice(`${kind === "audio" ? "Track" : "Cover artwork"} uploaded.`);
+    } catch (error) {
+      showNotice(
+        error instanceof Error ? error.message : `Unable to upload ${kind}.`,
+        true,
+      );
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleReleaseSave = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!releaseDraft.releaseTitle.trim() || !releaseDraft.trackTitle.trim()) {
+      showNotice("Release title and track title are required.", true);
+      return;
+    }
+    setBusy("release-save");
+    try {
+      const saved = await saveDiscographyRelease(releaseDraft);
+      setReleases((current) => {
+        const next = [saved, ...current.filter((release) => release.id !== saved.id)];
+        return next.sort((left, right) => left.sortOrder - right.sortOrder);
+      });
+      setReleaseDraft(emptyReleaseDraft);
+      showNotice("Release saved to the public discography.");
+    } catch (error) {
+      showNotice(
+        error instanceof Error ? error.message : "Unable to save this release.",
+        true,
+      );
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleReleaseDelete = async (id: string) => {
+    setBusy(`release-delete-${id}`);
+    try {
+      await deleteDiscographyRelease(id);
+      setReleases((current) => current.filter((release) => release.id !== id));
+      showNotice("Release removed from the discography.");
+    } catch (error) {
+      showNotice(
+        error instanceof Error ? error.message : "Unable to delete this release.",
+        true,
+      );
+    } finally {
+      setBusy("");
+    }
   };
 
   const onSelectPhoto = (file: File | null) => {
@@ -227,8 +370,9 @@ export default function AdminPage() {
       try {
         const content = await fetchSiteContent();
         if (!active) return;
-        setPhotos(content.gallery);
+        setPhotos(content.remoteGallery);
         setSettings(content.settings);
+        setReleases(content.releases);
       } catch (error) {
         showNotice(
           error instanceof Error ? error.message : "Unable to load data",
@@ -391,8 +535,14 @@ export default function AdminPage() {
           <a href="#overview" className="active">
             <AdminIcon>{icons.grid}</AdminIcon>Dashboard
           </a>
+          <a href="#site-settings">
+            <AdminIcon>{icons.grid}</AdminIcon>Site content
+          </a>
           <a href="#gallery-settings">
             <AdminIcon>{icons.image}</AdminIcon>Gallery
+          </a>
+          <a href="#discography-settings">
+            <AdminIcon>{icons.music}</AdminIcon>Discography
           </a>
           <a href="#media-settings">
             <AdminIcon>{icons.music}</AdminIcon>Media
@@ -447,10 +597,92 @@ export default function AdminPage() {
             </strong>
             <small>Supabase Storage (byte-range streaming)</small>
           </article>
+          <article>
+            <span>Discography releases</span>
+            <strong>{releases.length.toString().padStart(2, "0")}</strong>
+            <small>Published tracks</small>
+          </article>
         </div>
 
         <div className="admin-grid">
           <div className="admin-controls">
+            <section className="admin-panel" id="site-settings">
+              <div className="admin-panel-heading">
+                <span className="admin-panel-icon">
+                  <AdminIcon>{icons.grid}</AdminIcon>
+                </span>
+                <div>
+                  <h2>Landing page content</h2>
+                  <p>Changes publish to the home page in real time</p>
+                </div>
+              </div>
+              <form className="admin-form" onSubmit={handleSettingsSave}>
+                <label className="admin-field">
+                  <span>Hero headline</span>
+                  <input
+                    required
+                    value={settings.heroHeadline}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        heroHeadline: event.target.value,
+                      }))
+                    }
+                    placeholder="Headline shown above the player"
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>Hero subtitle</span>
+                  <input
+                    required
+                    value={settings.heroSubtitle}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        heroSubtitle: event.target.value,
+                      }))
+                    }
+                    placeholder="Short introduction for listeners"
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>Background music URL</span>
+                  <input
+                    type="url"
+                    value={settings.audioUrl}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        audioUrl: event.target.value,
+                      }))
+                    }
+                    placeholder="https://..."
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>Floating video URL</span>
+                  <input
+                    type="url"
+                    value={settings.videoUrl}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        videoUrl: event.target.value,
+                      }))
+                    }
+                    placeholder="https://..."
+                  />
+                </label>
+                <button
+                  className="admin-primary-button"
+                  type="submit"
+                  disabled={busy !== ""}
+                >
+                  {busy === "settings" ? "Saving…" : "Save landing page content"}
+                </button>
+              </form>
+            </section>
+
             {/* MUSIC SECTION */}
             <section className="admin-panel" id="media-settings">
               <div className="admin-panel-heading">
@@ -723,6 +955,203 @@ export default function AdminPage() {
               </button>
             </section>
 
+            <section className="admin-panel" id="discography-settings">
+              <div className="admin-panel-heading">
+                <span className="admin-panel-icon">
+                  <AdminIcon>{icons.music}</AdminIcon>
+                </span>
+                <div>
+                  <h2>{releaseDraft.id ? "Edit release" : "Add discography release"}</h2>
+                  <p>Track details, listening links, and artwork</p>
+                </div>
+              </div>
+              <form className="admin-form" onSubmit={handleReleaseSave}>
+                <label className="admin-field">
+                  <span>Release title</span>
+                  <input
+                    required
+                    value={releaseDraft.releaseTitle}
+                    onChange={(event) =>
+                      setReleaseDraft((current) => ({
+                        ...current,
+                        releaseTitle: event.target.value,
+                      }))
+                    }
+                    placeholder="Album or single title"
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>Track title</span>
+                  <input
+                    required
+                    value={releaseDraft.trackTitle}
+                    onChange={(event) =>
+                      setReleaseDraft((current) => ({
+                        ...current,
+                        trackTitle: event.target.value,
+                      }))
+                    }
+                    placeholder="Track name"
+                  />
+                </label>
+                <div className="admin-form-row">
+                  <label className="admin-field">
+                    <span>Artist</span>
+                    <input
+                      value={releaseDraft.artist}
+                      onChange={(event) =>
+                        setReleaseDraft((current) => ({
+                          ...current,
+                          artist: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label className="admin-field">
+                    <span>Release date</span>
+                    <input
+                      type="date"
+                      value={releaseDraft.releasedAt}
+                      onChange={(event) =>
+                        setReleaseDraft((current) => ({
+                          ...current,
+                          releasedAt: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                <label className="admin-field">
+                  <span>Listening / purchase URL</span>
+                  <input
+                    type="url"
+                    value={releaseDraft.releaseUrl}
+                    onChange={(event) =>
+                      setReleaseDraft((current) => ({
+                        ...current,
+                        releaseUrl: event.target.value,
+                      }))
+                    }
+                    placeholder="https://..."
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>Track audio URL</span>
+                  <input
+                    type="url"
+                    value={releaseDraft.audioUrl}
+                    onChange={(event) =>
+                      setReleaseDraft((current) => ({
+                        ...current,
+                        audioUrl: event.target.value,
+                      }))
+                    }
+                    placeholder="Upload a track or paste its URL"
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>Upload audio</span>
+                  <input
+                    type="file"
+                    accept="audio/*,.mp3,.wav,.ogg,.mpeg"
+                    onChange={(event) =>
+                      void handleReleaseAssetUpload(
+                        "audio",
+                        event.target.files?.[0] ?? null,
+                      )
+                    }
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>Cover artwork URL</span>
+                  <input
+                    type="url"
+                    value={releaseDraft.coverArtUrl}
+                    onChange={(event) =>
+                      setReleaseDraft((current) => ({
+                        ...current,
+                        coverArtUrl: event.target.value,
+                      }))
+                    }
+                    placeholder="Upload artwork or paste its URL"
+                  />
+                </label>
+                <label className="admin-field">
+                  <span>Upload cover artwork</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) =>
+                      void handleReleaseAssetUpload(
+                        "cover",
+                        event.target.files?.[0] ?? null,
+                      )
+                    }
+                  />
+                </label>
+                <button
+                  className="admin-primary-button"
+                  type="submit"
+                  disabled={busy !== ""}
+                >
+                  {busy === "release-save"
+                    ? "Saving…"
+                    : releaseDraft.id
+                      ? "Save release changes"
+                      : "Publish release"}
+                </button>
+                {releaseDraft.id && (
+                  <button
+                    className="admin-clear-button"
+                    type="button"
+                    onClick={() => setReleaseDraft(emptyReleaseDraft)}
+                  >
+                    Cancel editing
+                  </button>
+                )}
+              </form>
+
+              <div className="admin-release-list">
+                {releases.map((release) => (
+                  <article className="admin-release-row" key={release.id}>
+                    {release.coverArtUrl ? (
+                      <img src={release.coverArtUrl} alt="" loading="lazy" />
+                    ) : (
+                      <span className="admin-release-art-placeholder">
+                        <AdminIcon>{icons.music}</AdminIcon>
+                      </span>
+                    )}
+                    <div className="admin-release-copy">
+                      <strong>{release.trackTitle}</strong>
+                      <span>{release.releaseTitle} · {release.artist}</span>
+                      <small>{release.releasedAt || "Release date not set"}</small>
+                    </div>
+                    <div className="admin-release-actions">
+                      <button
+                        type="button"
+                        className="admin-clear-button"
+                        onClick={() => setReleaseDraft({ ...release })}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="admin-icon-action"
+                        aria-label={`Delete ${release.trackTitle}`}
+                        disabled={busy !== ""}
+                        onClick={() => void handleReleaseDelete(release.id)}
+                      >
+                        <AdminIcon className="h-4 w-4">{icons.trash}</AdminIcon>
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {releases.length === 0 && (
+                  <p className="admin-release-empty">No releases published yet.</p>
+                )}
+              </div>
+            </section>
+
             {/* GALLERY SECTION */}
             <section className="admin-panel" id="gallery-settings">
               <div className="admin-panel-heading">
@@ -865,11 +1294,75 @@ export default function AdminPage() {
                         </AdminIcon>
                       </button>
                     </div>
-                    <div className="admin-memory-copy">
-                      <h3>{photo.title}</h3>
-                      <p>{photo.subtitle}</p>
-                      <small>Photo by {photo.by}</small>
-                    </div>
+                    {editingPhoto?.id === photo.id ? (
+                      <form className="admin-memory-edit" onSubmit={handleGallerySave}>
+                        <label className="admin-field">
+                          <span>Image URL</span>
+                          <input
+                            required
+                            type="url"
+                            value={editingPhoto.url}
+                            onChange={(event) =>
+                              setEditingPhoto({ ...editingPhoto, url: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="admin-field">
+                          <span>Title</span>
+                          <input
+                            value={editingPhoto.title}
+                            onChange={(event) =>
+                              setEditingPhoto({ ...editingPhoto, title: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="admin-field">
+                          <span>Subtitle</span>
+                          <input
+                            value={editingPhoto.subtitle}
+                            onChange={(event) =>
+                              setEditingPhoto({ ...editingPhoto, subtitle: event.target.value })
+                            }
+                          />
+                        </label>
+                        <label className="admin-field">
+                          <span>Photographer</span>
+                          <input
+                            value={editingPhoto.by}
+                            onChange={(event) =>
+                              setEditingPhoto({ ...editingPhoto, by: event.target.value })
+                            }
+                          />
+                        </label>
+                        <button
+                          className="admin-primary-button"
+                          type="submit"
+                          disabled={busy !== ""}
+                        >
+                          {busy === `gallery-${photo.id}` ? "Saving…" : "Save details"}
+                        </button>
+                        <button
+                          className="admin-clear-button"
+                          type="button"
+                          onClick={() => setEditingPhoto(null)}
+                        >
+                          Cancel
+                        </button>
+                      </form>
+                    ) : (
+                      <div className="admin-memory-copy">
+                        <h3>{photo.title}</h3>
+                        <p>{photo.subtitle}</p>
+                        <small>Photo by {photo.by}</small>
+                        <button
+                          type="button"
+                          className="admin-clear-button"
+                          onClick={() => setEditingPhoto({ ...photo })}
+                        >
+                          Edit details
+                        </button>
+                      </div>
+                    )}
                   </article>
                 ))}
               </div>
