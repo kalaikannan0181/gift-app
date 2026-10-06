@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { apiBase, supabase } from "../lib/supabase";
+import { supabase } from "../lib/supabase";
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -29,48 +29,29 @@ export default function AdminLoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${apiBase}/admin/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
       });
-
-      if (response.ok) {
-        navigate("/admin", { replace: true });
+      if (signInError) {
+        setError(
+          signInError.message === "Invalid login credentials"
+            ? "Invalid login credentials. Confirm this admin user exists in the configured Supabase project and that its password is correct."
+            : signInError.message,
+        );
         return;
       }
-
-      const payload = (await response.json().catch(() => null)) as
-        | { error?: string }
-        | null;
-
-      if (payload?.error && payload.error !== "Admin password hash is not configured on the server.") {
-        setError(payload.error);
-        setLoading(false);
+      if (data.user.app_metadata?.role !== "admin") {
+        await supabase.auth.signOut();
+        setError("This account does not have the required admin role.");
         return;
       }
+      navigate("/admin", { replace: true });
     } catch {
-      // Fall back to the normal Supabase Auth route if the backend route is unavailable.
-    }
-
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (signInError) {
-      setError(signInError.message);
+      setError("Unable to reach Supabase Auth. Check your connection and try again.");
+    } finally {
       setLoading(false);
-      return;
     }
-    if (data.user.app_metadata?.role !== "admin") {
-      await supabase.auth.signOut();
-      setError("This account does not have the required admin role.");
-      setLoading(false);
-      return;
-    }
-    navigate("/admin", { replace: true });
   };
 
   return (
