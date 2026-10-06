@@ -412,6 +412,10 @@ export default function AdminPage() {
             <span>Signed in as {email}</span>
           </div>
           <div className="admin-header-actions">
+            <Link to="/" className="admin-back-button">
+              <AdminIcon className="h-4 w-4">{icons.arrow}</AdminIcon>
+              Back
+            </Link>
             <Link to="/" className="admin-preview-button">
               View live page ↗
             </Link>

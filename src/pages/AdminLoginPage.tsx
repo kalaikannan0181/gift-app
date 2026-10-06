@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { supabase } from "../lib/supabase";
+import { apiBase, supabase } from "../lib/supabase";
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
@@ -27,6 +27,34 @@ export default function AdminLoginPage() {
     event.preventDefault();
     setError("");
     setLoading(true);
+
+    try {
+      const response = await fetch(`${apiBase}/admin/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        navigate("/admin", { replace: true });
+        return;
+      }
+
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (payload?.error && payload.error !== "Admin password hash is not configured on the server.") {
+        setError(payload.error);
+        setLoading(false);
+        return;
+      }
+    } catch {
+      // Fall back to the normal Supabase Auth route if the backend route is unavailable.
+    }
+
     const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -49,6 +77,10 @@ export default function AdminLoginPage() {
     <main className="login-shell">
       <div className="login-atmosphere" />
       <Link to="/" className="login-logo">DJ<span>o</span>z</Link>
+      <Link to="/" className="login-back-button" aria-label="Back to the landing page">
+        <span aria-hidden="true">←</span>
+        Back to experience
+      </Link>
       <section className="login-card">
         <div className="login-lock"><span /></div>
         <p>Secure control room</p>

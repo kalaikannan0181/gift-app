@@ -1,6 +1,7 @@
 import { Hono, type Context } from "npm:hono";
 import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
+import bcrypt from "npm:bcrypt";
 import { createClient } from "jsr:@supabase/supabase-js@2.49.8";
 
 export const corsHeaders = {
@@ -110,7 +111,58 @@ function normalizeMediaType(type: string) {
   return type;
 }
 
+function getConfiguredAdminEmail() {
+  return (Deno.env.get("ADMIN_EMAIL") ?? "kalaikannan0181@gmail.com").trim().toLowerCase();
+}
+
+function getConfiguredAdminPasswordHash() {
+  return Deno.env.get("ADMIN_PASSWORD_HASH")?.trim();
+}
+
+async function verifyAdminPassword(password: string) {
+  const hash = getConfiguredAdminPasswordHash();
+  if (!hash) return false;
+  try {
+    return await bcrypt.compare(password, hash);
+  } catch {
+    return false;
+  }
+}
+
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+app.post("/admin/login", async (c) => {
+  try {
+    const body = await c.req.json<{ email?: string; password?: string }>();
+    const email = String(body.email ?? "").trim().toLowerCase();
+    const password = String(body.password ?? "");
+
+    if (!email || !password) {
+      return c.json({ error: "Email and password are required." }, 400);
+    }
+
+    if (email !== getConfiguredAdminEmail()) {
+      return c.json({ error: "Invalid credentials." }, 401);
+    }
+
+    const hash = getConfiguredAdminPasswordHash();
+    if (!hash) {
+      return c.json(
+        { error: "Admin password hash is not configured on the server." },
+        500,
+      );
+    }
+
+    const validPassword = await verifyAdminPassword(password);
+    if (!validPassword) {
+      return c.json({ error: "Invalid credentials." }, 401);
+    }
+
+    return c.json({ success: true, message: "Admin authenticated." });
+  } catch {
+    return c.json({ error: "Unable to validate admin login." }, 400);
+  }
+});
 
 app.get("/content", async (c) => {
   const { data, error } = await supabase
