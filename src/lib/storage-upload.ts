@@ -1,6 +1,5 @@
 import * as tus from "tus-js-client";
-import { projectId, publicAnonKey } from "../../utils/supabase/info";
-import { supabase } from "./supabase";
+import { publicAnonKey, projectId, supabase, supabaseUrl } from "./supabase";
 
 export type UploadStage =
   | "idle"
@@ -154,7 +153,7 @@ function uploadViaTusResumable(
       let currentSpeed = "";
 
       const upload = new tus.Upload(file, {
-        endpoint: `https://${projectId}.supabase.co/storage/v1/upload/resumable`,
+        endpoint: `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/upload/resumable`,
         retryDelays: [0, 1000, 3000, 5000],
         headers: {
           apikey: publicAnonKey,
@@ -239,7 +238,7 @@ function uploadViaStandardXhr(
       const cleanPath = objectPath.replace(/^\/+/, "");
       xhr.open(
         "POST",
-        `https://${projectId}.supabase.co/storage/v1/object/${bucket}/${cleanPath}`,
+        `${supabaseUrl.replace(/\/+$/, "")}/storage/v1/object/${bucket}/${cleanPath}`,
       );
 
       xhr.setRequestHeader("apikey", publicAnonKey);

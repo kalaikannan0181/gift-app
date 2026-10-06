@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import { useAdminAuth } from "../app/AuthProvider";
 import { supabase } from "../lib/supabase";
 
 export default function AdminLoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { isAdmin, isReady } = useAdminAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -14,14 +16,13 @@ export default function AdminLoginPage() {
     if (searchParams.get("error") === "unauthorized") {
       setError("This account does not have the required admin role.");
     }
-    void supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user.app_metadata?.role === "admin") {
-        navigate("/admin", { replace: true });
-      } else {
-        setLoading(false);
-      }
-    });
-  }, [navigate, searchParams]);
+    if (!isReady) return;
+    if (isAdmin) {
+      navigate("/admin", { replace: true });
+    } else {
+      setLoading(false);
+    }
+  }, [isAdmin, isReady, navigate, searchParams]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -34,11 +35,16 @@ export default function AdminLoginPage() {
         password,
       });
       if (signInError) {
+        console.error("Auth error details:", signInError);
         setError(
           signInError.message === "Invalid login credentials"
             ? "Invalid login credentials. Confirm this admin user exists in the configured Supabase project and that its password is correct."
             : signInError.message,
         );
+        return;
+      }
+      if (!data.session) {
+        setError("Supabase Auth did not return a session. Please try again.");
         return;
       }
       if (data.user.app_metadata?.role !== "admin") {

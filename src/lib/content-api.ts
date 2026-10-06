@@ -11,8 +11,7 @@ import {
   saveVideoUrl,
   type GalleryItem,
 } from "./gallery-storage";
-import { apiBase, supabase } from "./supabase";
-import { publicAnonKey } from "../../utils/supabase/info";
+import { apiBase, publicAnonKey, supabase } from "./supabase";
 import {
   uploadStorageMedia,
   type UploadProgressCallback,
