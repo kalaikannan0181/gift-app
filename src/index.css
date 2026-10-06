@@ -1455,6 +1455,7 @@ button {
 }
 
 .admin-primary-button:disabled,
+.admin-audio-name-save:disabled,
 .admin-memory-image button:disabled {
   cursor: wait;
   opacity: 0.55;
@@ -1492,6 +1493,25 @@ button {
   box-shadow: 0 10px 30px rgba(184, 41, 255, 0.35);
   filter: brightness(1.12);
   transform: translateY(-1px);
+}
+
+.admin-audio-name-save {
+  justify-self: start;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(200, 61, 255, 0.3);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(184, 41, 255, 0.1);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.admin-audio-name-save:hover:not(:disabled) {
+  border-color: rgba(200, 61, 255, 0.65);
+  background: rgba(184, 41, 255, 0.2);
 }
 
 .admin-gallery-panel {

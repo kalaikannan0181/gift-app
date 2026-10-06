@@ -15,23 +15,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    void supabase.auth.getSession().then(({ data }) => {
-      setAuthState({
-        isAdmin: data.session?.user.app_metadata?.role === "admin",
-        isReady: true,
-      });
-    });
-
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthState({
-        isAdmin: session?.user.app_metadata?.role === "admin",
-        isReady: true,
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      setAuthState((current) => {
+        const isAdminSession =
+          session?.user.app_metadata?.role === "admin";
+        if (event === "SIGNED_IN") {
+          return { isAdmin: isAdminSession, isReady: true };
+        }
+        if (event === "INITIAL_SESSION" || event === "SIGNED_OUT") {
+          return { isAdmin: false, isReady: true };
+        }
+        return {
+          isAdmin: current.isAdmin && isAdminSession,
+          isReady: true,
+        };
       });
     });
 
-    return () => subscription.unsubscribe();
+    let active = true;
+    void supabase.auth.getSession().then(({ error }) => {
+      if (error) {
+        console.error("Unable to check the Supabase session:", error);
+      }
+      if (active) {
+        setAuthState((current) => ({ ...current, isReady: true }));
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   return <AuthContext.Provider value={authState}>{children}</AuthContext.Provider>;

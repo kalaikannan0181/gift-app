@@ -6,7 +6,7 @@ import { supabase } from "../lib/supabase";
 export default function AdminLoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { isAdmin, isReady } = useAdminAuth();
+  const { isReady } = useAdminAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -19,12 +19,26 @@ export default function AdminLoginPage() {
       );
     }
     if (!isReady) return;
-    if (isAdmin) {
-      navigate("/admin", { replace: true });
-    } else {
-      setLoading(false);
-    }
-  }, [isAdmin, isReady, navigate, searchParams]);
+    let active = true;
+    void (async () => {
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (data.session) {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) throw signOutError;
+      }
+      if (active) setLoading(false);
+    })().catch((sessionError: unknown) => {
+      console.error("Unable to clear the previous admin session:", sessionError);
+      if (active) {
+        setError("Unable to clear the previous session. Please refresh and try again.");
+        setLoading(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [isReady, searchParams]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();

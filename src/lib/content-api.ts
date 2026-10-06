@@ -107,6 +107,7 @@ export type { UploadProgressCallback, UploadProgressInfo } from "./storage-uploa
 
 export type SiteSettings = {
   audioUrl: string;
+  audioName: string;
   videoUrl: string;
   heroHeadline: string;
   heroSubtitle: string;
@@ -250,6 +251,7 @@ export async function fetchSiteContent(): Promise<SiteContent> {
   let cloudSettings: {
     audio_url?: string | null;
     background_music_url?: string | null;
+    background_music_name?: string | null;
     floating_video_url?: string | null;
     hero_headline?: string | null;
     hero_subtitle?: string | null;
@@ -283,6 +285,7 @@ export async function fetchSiteContent(): Promise<SiteContent> {
     cloudSettings = settingsResult.data as {
       audio_url?: string | null;
       background_music_url?: string | null;
+      background_music_name?: string | null;
       floating_video_url?: string | null;
       hero_headline?: string | null;
       hero_subtitle?: string | null;
@@ -340,6 +343,7 @@ export async function fetchSiteContent(): Promise<SiteContent> {
     remoteGallery: cloudGallery,
     settings: {
       audioUrl: rawAudio ? (normalizeAudioUrl(rawAudio) || rawAudio) : (audioUrl || ""),
+      audioName: cloudSettings?.background_music_name?.trim() || "",
       videoUrl: rawVideo ? (normalizeVideoUrl(rawVideo) || rawVideo) : (videoUrl || ""),
       heroHeadline: cloudSettings?.hero_headline?.trim() || "Feel the heart beats",
       heroSubtitle:
@@ -363,6 +367,7 @@ export async function saveSiteSettings(settings: SiteSettings) {
       {
         id: 1,
         background_music_url: nextAudioUrl,
+        background_music_name: settings.audioName.trim(),
         floating_video_url: nextVideoUrl,
         hero_headline: settings.heroHeadline.trim(),
         hero_subtitle: settings.heroSubtitle.trim(),
@@ -390,6 +395,16 @@ export async function saveSiteSettings(settings: SiteSettings) {
   }
 
   return data;
+}
+
+export async function saveAudioName(audioName: string) {
+  const { error } = await supabase
+    .from("site_settings")
+    .upsert(
+      { id: 1, background_music_name: audioName.trim() },
+      { onConflict: "id" },
+    );
+  if (error) throw error;
 }
 
 export async function updateGalleryItem(
@@ -589,6 +604,7 @@ export async function uploadMedia(
   type: "music" | "video",
   file: File,
   onProgress?: UploadProgressCallback,
+  audioName?: string,
 ) {
   const validation = validateMediaFile(type === "music" ? "music" : "videos", file);
   if (!validation.valid) {
@@ -597,6 +613,8 @@ export async function uploadMedia(
 
   if (type === "music") {
     const extension = file.name.split(".").pop()?.toLowerCase() || "mp3";
+    const displayName =
+      audioName?.trim() || file.name.replace(/\.[^/.]+$/, "").trim();
     const fileName = `track-${Date.now()}.${extension === "mpeg" ? "mp3" : extension}`;
     let contentType = file.type || "audio/mpeg";
     if (extension === "mp3" || extension === "mpeg") contentType = "audio/mpeg";
@@ -631,7 +649,11 @@ export async function uploadMedia(
     const { error: settingsError } = await supabase
       .from("site_settings")
       .upsert(
-        { id: 1, background_music_url: activeAudioUrl },
+        {
+          id: 1,
+          background_music_url: activeAudioUrl,
+          background_music_name: displayName,
+        },
         { onConflict: "id" },
       )
       .select("*")
@@ -653,7 +675,7 @@ export async function uploadMedia(
     });
 
     return {
-      settings: { audioUrl: activeAudioUrl, videoUrl: "" },
+      settings: { audioUrl: activeAudioUrl, audioName: displayName, videoUrl: "" },
     };
   }
 
@@ -712,7 +734,7 @@ export async function uploadMedia(
     });
 
     return {
-      settings: { audioUrl: "", videoUrl: activeVideoUrl },
+      settings: { audioUrl: "", audioName: "", videoUrl: activeVideoUrl },
     };
   }
 

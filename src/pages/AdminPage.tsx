@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router";
+import { useAdminAuth } from "../app/AuthProvider";
 import {
   deleteGalleryItem,
   deleteDiscographyRelease,
   fetchSiteContent,
+  saveAudioName,
   saveDiscographyRelease,
   saveSiteSettings,
   updateGalleryItem,
@@ -98,6 +100,7 @@ const icons = {
 
 const emptySettings: SiteSettings = {
   audioUrl: "",
+  audioName: "",
   videoUrl: "",
   heroHeadline: "Feel the heart beats",
   heroSubtitle: "Let the rhythm move through you.",
@@ -137,6 +140,7 @@ type ActiveUploadProgress = UploadProgressInfo & {
 
 export default function AdminPage() {
   const navigate = useNavigate();
+  const { isAdmin, isReady } = useAdminAuth();
   const [photos, setPhotos] = useState<GalleryItem[]>(getGalleryItems);
   const [releases, setReleases] = useState<DiscographyRelease[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(emptySettings);
@@ -177,6 +181,24 @@ export default function AdminPage() {
         formatDatabaseError(error, "Unable to save site settings"),
         true,
       );
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const handleAudioNameSave = async () => {
+    const audioName = settings.audioName.trim();
+    if (!audioName) {
+      showNotice("Enter a name for the background audio.", true);
+      return;
+    }
+    setBusy("audio-name");
+    try {
+      await saveAudioName(audioName);
+      setSettings((current) => ({ ...current, audioName }));
+      showNotice("Background audio name updated.");
+    } catch (error) {
+      showNotice(formatDatabaseError(error, "Unable to update audio name"), true);
     } finally {
       setBusy("");
     }
@@ -331,6 +353,10 @@ export default function AdminPage() {
       return;
     }
     setMusicFile(file);
+    setSettings((current) => ({
+      ...current,
+      audioName: file.name.replace(/\.[^/.]+$/, "").trim(),
+    }));
     try {
       setMusicPreview(URL.createObjectURL(file));
     } catch {
@@ -375,6 +401,13 @@ export default function AdminPage() {
   }, [photoPreview, videoPreview, musicPreview]);
 
   useEffect(() => {
+    if (!isReady) return;
+    if (!isAdmin) {
+      setLoading(false);
+      navigate("/admin/login", { replace: true });
+      return;
+    }
+
     let active = true;
 
     // Listen for auth state changes (e.g. sign out or role change)
@@ -434,6 +467,7 @@ export default function AdminPage() {
           if (!active || payload.eventType === "DELETE") return;
           const s = payload.new as {
             background_music_url?: string | null;
+            background_music_name?: string | null;
             floating_video_url?: string | null;
             hero_headline?: string | null;
             hero_subtitle?: string | null;
@@ -441,6 +475,7 @@ export default function AdminPage() {
           setSettings((prev) => ({
             ...prev,
             audioUrl: s.background_music_url ?? prev.audioUrl,
+            audioName: s.background_music_name ?? prev.audioName,
             videoUrl: s.floating_video_url ?? prev.videoUrl,
             heroHeadline: s.hero_headline?.trim() || prev.heroHeadline,
             heroSubtitle: s.hero_subtitle?.trim() || prev.heroSubtitle,
@@ -516,7 +551,7 @@ export default function AdminPage() {
       authSub.unsubscribe();
       void supabase.removeChannel(realtimeChannel);
     };
-  }, [navigate]);
+  }, [isAdmin, isReady, navigate]);
 
   useEffect(() => {
     if (!notice) return;
@@ -550,17 +585,26 @@ export default function AdminPage() {
     });
 
     try {
-      const result = await uploadMedia(type, file, (progressInfo) => {
-        setUploadProgress({
-          type,
-          ...progressInfo,
-        });
-      });
+      const result = await uploadMedia(
+        type,
+        file,
+        (progressInfo) => {
+          setUploadProgress({
+            type,
+            ...progressInfo,
+          });
+        },
+        type === "music" ? settings.audioName : undefined,
+      );
 
       setSettings((current) =>
         type === "video"
           ? { ...current, videoUrl: result.settings.videoUrl }
-          : { ...current, audioUrl: result.settings.audioUrl },
+          : {
+              ...current,
+              audioUrl: result.settings.audioUrl,
+              audioName: result.settings.audioName,
+            },
       );
 
       if (type === "music") {
@@ -908,13 +952,43 @@ export default function AdminPage() {
               {/* CURRENTLY PUBLISHED LIVE AUDIO */}
               {settings.audioUrl && !musicPreview && (
                 <div className="admin-live-media">
-                  <span className="admin-media-badge">Live background audio</span>
+                  <span className="admin-media-badge">
+                    Live background audio{settings.audioName ? ` · ${settings.audioName}` : ""}
+                  </span>
                   <audio
                     className="admin-audio"
                     src={settings.audioUrl}
                     preload="metadata"
                     controls
                   />
+                </div>
+              )}
+
+              {(settings.audioUrl || musicFile) && (
+                <div className="admin-form">
+                  <label className="admin-field">
+                    <span>Audio name</span>
+                    <input
+                      value={settings.audioName}
+                      onChange={(event) =>
+                        setSettings((current) => ({
+                          ...current,
+                          audioName: event.target.value,
+                        }))
+                      }
+                      placeholder="Enter a name for this audio"
+                    />
+                  </label>
+                  {settings.audioUrl && (
+                    <button
+                      className="admin-audio-name-save"
+                      type="button"
+                      onClick={() => void handleAudioNameSave()}
+                      disabled={busy !== ""}
+                    >
+                      {busy === "audio-name" ? "Saving name…" : "Save audio name"}
+                    </button>
+                  )}
                 </div>
               )}
 

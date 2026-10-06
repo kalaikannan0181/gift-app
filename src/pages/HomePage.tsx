@@ -4,6 +4,7 @@ import {
   getAudioUrl,
   getVideoUrl,
   getGalleryItems,
+  DEFAULT_AUDIO_URL,
   normalizeAudioUrl,
   defaultGalleryItems,
   type GalleryItem,
@@ -417,6 +418,7 @@ export default function App() {
     useState<GalleryItem[]>(getGalleryItems);
   const [releases, setReleases] = useState<DiscographyRelease[]>([]);
   const [audioUrl, setAudioUrl] = useState(getAudioUrl);
+  const [audioName, setAudioName] = useState("");
   const [videoUrl, setVideoUrl] = useState(getVideoUrl);
   const [heroHeadline, setHeroHeadline] = useState("Feel the heart beats");
   const [heroSubtitle, setHeroSubtitle] = useState("Let the rhythm move through you.");
@@ -460,11 +462,13 @@ export default function App() {
           receivedSettingsUpdate = true;
           const settings = payload.new as {
             background_music_url?: string | null;
+            background_music_name?: string | null;
             floating_video_url?: string | null;
             hero_headline?: string | null;
             hero_subtitle?: string | null;
           };
           setAudioUrl(normalizeAudioUrl(settings.background_music_url ?? ""));
+          setAudioName(settings.background_music_name?.trim() || "");
           setAudioError("");
           setVideoUrl(settings.floating_video_url ?? "");
           setHeroHeadline(settings.hero_headline?.trim() || "Feel the heart beats");
@@ -567,6 +571,7 @@ export default function App() {
         setReleases(initialReleases.sort((left, right) => left.sortOrder - right.sortOrder));
         if (!receivedMusicUpdate) {
           setAudioUrl(normalizeAudioUrl(content.settings.audioUrl));
+          setAudioName(content.settings.audioName);
         }
         if (!receivedVideoUpdate) {
           setVideoUrl(content.settings.videoUrl || getVideoUrl());
@@ -725,7 +730,11 @@ export default function App() {
             isBuffering={isAudioBuffering}
             currentTime={audioCurrentTime}
             duration={audioDuration}
-            trackTitle={featuredRelease?.trackTitle || "DJoz"}
+            trackTitle={
+              featuredRelease?.audioUrl
+                ? featuredRelease.trackTitle
+                : audioName || featuredRelease?.trackTitle || "DJoz"
+            }
             artistName={featuredRelease?.artist || "Featured track"}
             audioError={audioError}
             onPlayingChange={(playing) => {
