@@ -1,0 +1,10 @@
+{
+  "description": "Showcase your music with a sleek dark-mode landing page featuring an interactive audio player, vibrant visuals, and easy navigation for fans and artists.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
