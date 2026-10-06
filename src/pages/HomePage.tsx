@@ -426,7 +426,7 @@ export default function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const featuredRelease = releases[0];
-  const featuredAudioUrl = featuredRelease?.audioUrl || audioUrl;
+  const featuredAudioUrl = featuredRelease?.audioUrl || audioUrl || DEFAULT_AUDIO_URL;
 
   useEffect(() => {
     let active = true;
@@ -448,12 +448,13 @@ export default function App() {
       .on(
         "postgres_changes",
         {
-          event: "UPDATE",
+          event: "*",
           schema: "public",
           table: "site_settings",
           filter: "id=eq.1",
         },
         (payload) => {
+          if (payload.eventType === "DELETE") return;
           receivedMusicUpdate = true;
           receivedVideoUpdate = true;
           receivedSettingsUpdate = true;
@@ -482,10 +483,13 @@ export default function App() {
           }
           const item = galleryPhotoToItem(payload.new as GalleryPhotoRow);
           if (!initialFetchComplete) pendingGalleryChanges.push({ type: "UPSERT", item });
-          setGalleryItems((current) => [
-            item,
-            ...current.filter((photo) => photo.id !== item.id),
-          ]);
+          setGalleryItems((current) => {
+            const exists = current.some((photo) => photo.id === item.id);
+            if (exists) {
+              return current.map((photo) => (photo.id === item.id ? item : photo));
+            }
+            return [item, ...current];
+          });
         },
       )
       .on(

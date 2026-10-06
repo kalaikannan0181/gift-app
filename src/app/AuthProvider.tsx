@@ -15,6 +15,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      setAuthState({
+        isAdmin: data.session?.user.app_metadata?.role === "admin",
+        isReady: true,
+      });
+    });
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {

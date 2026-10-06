@@ -14,7 +14,9 @@ export default function AdminLoginPage() {
 
   useEffect(() => {
     if (searchParams.get("error") === "unauthorized") {
-      setError("This account does not have the required admin role.");
+      setError(
+        "This account does not have the required admin role (app_metadata.role = 'admin'). Verify that user kalaikannan0181@gmail.com has raw_app_meta_data set to {\"role\":\"admin\"} in Supabase Auth.",
+      );
     }
     if (!isReady) return;
     if (isAdmin) {
@@ -49,7 +51,9 @@ export default function AdminLoginPage() {
       }
       if (data.user.app_metadata?.role !== "admin") {
         await supabase.auth.signOut();
-        setError("This account does not have the required admin role.");
+        setError(
+          `This account (${email.trim()}) does not have the required admin role. Verify that app_metadata contains {"role":"admin"} in Supabase Authentication.`,
+        );
         return;
       }
       navigate("/admin", { replace: true });

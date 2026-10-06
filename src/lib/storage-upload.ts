@@ -28,10 +28,13 @@ export type UploadMediaOptions = {
   onProgress?: UploadProgressCallback;
 };
 
-// Maximum supported media file size (500 MB)
-export const MAX_MEDIA_FILE_SIZE = 500 * 1024 * 1024;
-// Threshold above which chunked/resumable TUS upload is required (6 MB)
-export const RESUMABLE_UPLOAD_THRESHOLD = 6 * 1024 * 1024;
+// Keep file uploads usable for project media while respecting Supabase storage limits.
+// 250 MB is a practical cap for direct admin uploads; heavy videos can still be
+// hosted externally (YouTube/Vimeo/Cloudinary/CDN) without forcing a re-upload.
+export const MAX_MEDIA_FILE_SIZE = 250 * 1024 * 1024;
+// Supabase can struggle with large direct uploads above ~40MB on free/shared tiers,
+// so prefer resumable chunked uploads once we cross this threshold.
+export const RESUMABLE_UPLOAD_THRESHOLD = 40 * 1024 * 1024;
 
 export function formatBytes(bytes: number, decimals = 1): string {
   if (bytes <= 0 || isNaN(bytes)) return "0 B";
@@ -315,6 +318,53 @@ function uploadViaStandardXhr(
   });
 }
 
+export function validateMediaFile(
+  bucket: "music" | "videos" | "photos",
+  file: File,
+): { valid: boolean; error?: string } {
+  if (file.size > MAX_MEDIA_FILE_SIZE) {
+    return {
+      valid: false,
+      error: `File size exceeds the supported 250 MB upload limit (${formatBytes(file.size)}). For larger videos, use an external URL or a CDN-hosted MP4.`,
+    };
+  }
+
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
+  if (bucket === "photos") {
+    const isImage =
+      file.type.startsWith("image/") ||
+      ["jpg", "jpeg", "png", "webp", "gif", "avif", "svg"].includes(extension);
+    if (!isImage) {
+      return {
+        valid: false,
+        error: `Invalid file type for photos bucket: expected an image (JPG, PNG, WebP, GIF), got ${file.type || extension || "unknown"}.`,
+      };
+    }
+  } else if (bucket === "music") {
+    const isAudio =
+      file.type.startsWith("audio/") ||
+      ["mp3", "wav", "ogg", "mpeg", "m4a", "aac", "flac"].includes(extension);
+    if (!isAudio) {
+      return {
+        valid: false,
+        error: `Invalid file type for music bucket: expected audio (MP3, WAV, OGG, MPEG, M4A), got ${file.type || extension || "unknown"}.`,
+      };
+    }
+  } else if (bucket === "videos") {
+    const isVideo =
+      file.type.startsWith("video/") ||
+      ["mp4", "webm", "mov", "m4v"].includes(extension);
+    if (!isVideo) {
+      return {
+        valid: false,
+        error: `Invalid file type for videos bucket: expected video (MP4, WebM, MOV), got ${file.type || extension || "unknown"}.`,
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
 /**
  * Universal media upload function:
  * - Supports large files up to 500MB
@@ -330,11 +380,12 @@ export async function uploadStorageMedia(
   options: UploadMediaOptions = {},
 ): Promise<{ objectPath: string; publicUrl: string }> {
   // 1. Validation
-  if (file.size > MAX_MEDIA_FILE_SIZE) {
-    throw new Error(
-      `File size exceeds 500 MB limit. Selected file is ${formatBytes(file.size)}.`,
-    );
+  const validation = validateMediaFile(bucket, file);
+  if (!validation.valid) {
+    throw new Error(validation.error);
   }
+
+  const extension = file.name.split(".").pop()?.toLowerCase() || "";
 
   const {
     cacheControl = "3600",
@@ -342,15 +393,18 @@ export async function uploadStorageMedia(
     onProgress,
   } = options;
 
-  const extension = file.name.split(".").pop()?.toLowerCase() || "";
   let defaultContentType = file.type;
-  if (!defaultContentType) {
-    if (extension === "mp3") defaultContentType = "audio/mpeg";
+  if (!defaultContentType || defaultContentType === "application/octet-stream") {
+    if (extension === "mp3" || extension === "mpeg") defaultContentType = "audio/mpeg";
     else if (extension === "wav") defaultContentType = "audio/wav";
     else if (extension === "ogg") defaultContentType = "audio/ogg";
+    else if (extension === "m4a") defaultContentType = "audio/mp4";
     else if (extension === "mp4") defaultContentType = "video/mp4";
     else if (extension === "webm") defaultContentType = "video/webm";
-    else defaultContentType = "application/octet-stream";
+    else if (extension === "jpg" || extension === "jpeg") defaultContentType = "image/jpeg";
+    else if (extension === "png") defaultContentType = "image/png";
+    else if (extension === "webp") defaultContentType = "image/webp";
+    else defaultContentType = file.type || "application/octet-stream";
   }
 
   const contentType = options.contentType || defaultContentType;
@@ -384,17 +438,28 @@ export async function uploadStorageMedia(
         "TUS resumable upload encountered an issue, attempting standard storage upload fallback:",
         tusError,
       );
-      // Fallback to standard Supabase upload if TUS is blocked by proxy
-      const { error: fallbackError } = await supabase.storage
-        .from(bucket)
-        .upload(objectPath, file, {
-          contentType,
-          cacheControl,
-          upsert,
-        });
-      if (fallbackError) {
-        throw fallbackError;
-      }
+  // If the Supabase project enforces a smaller per-request limit on the free/shared tier,
+  // show the user a concise message instead of silently failing during the bigger upload path.
+  try {
+    const { error: fallbackError } = await supabase.storage
+      .from(bucket)
+      .upload(objectPath, file, {
+        contentType,
+        cacheControl,
+        upsert,
+      });
+    if (fallbackError) {
+      throw fallbackError;
+    }
+  } catch (fallbackError) {
+    const msg =
+      typeof fallbackError === "object" && fallbackError && "message" in fallbackError
+        ? String((fallbackError as { message?: string }).message)
+        : "Supabase Storage rejected the upload.";
+    throw new Error(
+      `${msg}. This file exceeds the supported tier upload limit for direct storage upload. Consider using an external MP4 URL (YouTube/Vimeo/Cloudinary/CDN) for large videos.`,
+    );
+  }
     }
   } else {
     try {

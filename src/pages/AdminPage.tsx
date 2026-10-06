@@ -12,6 +12,8 @@ import {
   uploadMedia,
   formatBytes,
   formatUploadError,
+  formatDatabaseError,
+  validateMediaFile,
   MAX_MEDIA_FILE_SIZE,
   type SiteSettings,
   type DiscographyRelease,
@@ -172,7 +174,7 @@ export default function AdminPage() {
       showNotice("Site settings saved and published.");
     } catch (error) {
       showNotice(
-        error instanceof Error ? error.message : "Unable to save site settings.",
+        formatDatabaseError(error, "Unable to save site settings"),
         true,
       );
     } finally {
@@ -193,7 +195,7 @@ export default function AdminPage() {
       showNotice("Gallery details updated.");
     } catch (error) {
       showNotice(
-        error instanceof Error ? error.message : "Unable to update gallery details.",
+        formatDatabaseError(error, "Unable to update gallery details"),
         true,
       );
     } finally {
@@ -206,9 +208,15 @@ export default function AdminPage() {
     file: File | null,
   ) => {
     if (!file) return;
+    const bucket = kind === "audio" ? "music" : "photos";
+    const validation = validateMediaFile(bucket, file);
+    if (!validation.valid) {
+      showNotice(validation.error || "Invalid file selected.", true);
+      return;
+    }
     setBusy(`release-${kind}`);
     try {
-      const url = await uploadReleaseAsset(kind === "audio" ? "music" : "photos", file);
+      const url = await uploadReleaseAsset(bucket, file);
       setReleaseDraft((current) =>
         kind === "audio"
           ? { ...current, audioUrl: url }
@@ -217,7 +225,7 @@ export default function AdminPage() {
       showNotice(`${kind === "audio" ? "Track" : "Cover artwork"} uploaded.`);
     } catch (error) {
       showNotice(
-        error instanceof Error ? error.message : `Unable to upload ${kind}.`,
+        formatUploadError(error),
         true,
       );
     } finally {
@@ -242,7 +250,7 @@ export default function AdminPage() {
       showNotice("Release saved to the public discography.");
     } catch (error) {
       showNotice(
-        error instanceof Error ? error.message : "Unable to save this release.",
+        formatDatabaseError(error, "Unable to save this release"),
         true,
       );
     } finally {
@@ -258,7 +266,7 @@ export default function AdminPage() {
       showNotice("Release removed from the discography.");
     } catch (error) {
       showNotice(
-        error instanceof Error ? error.message : "Unable to delete this release.",
+        formatDatabaseError(error, "Unable to delete this release"),
         true,
       );
     } finally {
@@ -275,6 +283,13 @@ export default function AdminPage() {
       }
     }
     if (!file) {
+      setPhotoFile(null);
+      setPhotoPreview(null);
+      return;
+    }
+    const validation = validateMediaFile("photos", file);
+    if (!validation.valid) {
+      showNotice(validation.error || "Invalid photo file.", true);
       setPhotoFile(null);
       setPhotoPreview(null);
       return;
@@ -308,8 +323,11 @@ export default function AdminPage() {
       setMusicPreview(null);
       return;
     }
-    if (file.size > MAX_MEDIA_FILE_SIZE) {
-      showNotice(`File exceeds 500 MB limit (${formatBytes(file.size)}).`, true);
+    const validation = validateMediaFile("music", file);
+    if (!validation.valid) {
+      showNotice(validation.error || "Invalid music file.", true);
+      setMusicFile(null);
+      setMusicPreview(null);
       return;
     }
     setMusicFile(file);
@@ -333,8 +351,11 @@ export default function AdminPage() {
       setVideoPreview(null);
       return;
     }
-    if (file.size > MAX_MEDIA_FILE_SIZE) {
-      showNotice(`File exceeds 500 MB limit (${formatBytes(file.size)}).`, true);
+    const validation = validateMediaFile("videos", file);
+    if (!validation.valid) {
+      showNotice(validation.error || "Invalid video file.", true);
+      setVideoFile(null);
+      setVideoPreview(null);
       return;
     }
     setVideoFile(file);
@@ -355,6 +376,21 @@ export default function AdminPage() {
 
   useEffect(() => {
     let active = true;
+
+    // Listen for auth state changes (e.g. sign out or role change)
+    const {
+      data: { subscription: authSub },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!active) return;
+      if (
+        event === "SIGNED_OUT" ||
+        !session ||
+        session.user.app_metadata?.role !== "admin"
+      ) {
+        navigate("/admin/login", { replace: true });
+      }
+    });
+
     void supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return;
       if (!data.session) {
@@ -375,15 +411,110 @@ export default function AdminPage() {
         setReleases(content.releases);
       } catch (error) {
         showNotice(
-          error instanceof Error ? error.message : "Unable to load data",
+          formatDatabaseError(error, "Unable to load dashboard data"),
           true,
         );
       } finally {
         if (active) setLoading(false);
       }
     });
+
+    // Realtime subscription for live admin control room synchronization
+    const realtimeChannel = supabase
+      .channel("admin-control-room-sync")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "site_settings",
+          filter: "id=eq.1",
+        },
+        (payload) => {
+          if (!active || payload.eventType === "DELETE") return;
+          const s = payload.new as {
+            background_music_url?: string | null;
+            floating_video_url?: string | null;
+            hero_headline?: string | null;
+            hero_subtitle?: string | null;
+          };
+          setSettings((prev) => ({
+            ...prev,
+            audioUrl: s.background_music_url ?? prev.audioUrl,
+            videoUrl: s.floating_video_url ?? prev.videoUrl,
+            heroHeadline: s.hero_headline?.trim() || prev.heroHeadline,
+            heroSubtitle: s.hero_subtitle?.trim() || prev.heroSubtitle,
+          }));
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "gallery_photos" },
+        (payload) => {
+          if (!active) return;
+          if (payload.eventType === "DELETE") {
+            const id = String(payload.old.id);
+            setPhotos((current) => current.filter((p) => p.id !== id));
+            return;
+          }
+          const item = {
+            id: String(payload.new.id),
+            title: payload.new.title || "Gallery photo",
+            subtitle: payload.new.subtitle || "",
+            by: payload.new.photographer_name || "DJoz",
+            url: payload.new.image_url,
+          };
+          setPhotos((current) => [
+            item,
+            ...current.filter((p) => p.id !== item.id),
+          ]);
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "discography_releases" },
+        (payload) => {
+          if (!active) return;
+          if (payload.eventType === "DELETE") {
+            const id = String(payload.old.id);
+            setReleases((current) => current.filter((r) => r.id !== id));
+            return;
+          }
+          const row = payload.new as {
+            id: string;
+            release_title: string;
+            track_title: string;
+            artist?: string | null;
+            audio_url?: string | null;
+            release_url?: string | null;
+            cover_art_url?: string | null;
+            released_at?: string | null;
+            sort_order?: number | null;
+          };
+          const rel: DiscographyRelease = {
+            id: row.id,
+            releaseTitle: row.release_title,
+            trackTitle: row.track_title,
+            artist: row.artist || "DJoz",
+            audioUrl: row.audio_url || "",
+            releaseUrl: row.release_url || "",
+            coverArtUrl: row.cover_art_url || "",
+            releasedAt: row.released_at || "",
+            sortOrder: row.sort_order ?? 0,
+          };
+          setReleases((current) =>
+            [rel, ...current.filter((r) => r.id !== rel.id)].sort(
+              (a, b) => a.sortOrder - b.sortOrder,
+            ),
+          );
+        },
+      )
+      .subscribe();
+
     return () => {
       active = false;
+      authSub.unsubscribe();
+      void supabase.removeChannel(realtimeChannel);
     };
   }, [navigate]);
 
@@ -402,11 +533,9 @@ export default function AdminPage() {
       return;
     }
 
-    if (file.size > MAX_MEDIA_FILE_SIZE) {
-      showNotice(
-        `File exceeds 500 MB limit (${formatBytes(file.size)}). Please choose a file up to 500MB.`,
-        true,
-      );
+    const validation = validateMediaFile(type === "music" ? "music" : "videos", file);
+    if (!validation.valid) {
+      showNotice(validation.error || "Invalid file selected.", true);
       return;
     }
 
@@ -447,7 +576,10 @@ export default function AdminPage() {
         false,
       );
     } catch (error) {
-      const actionableError = formatUploadError(error);
+      const actionableError =
+        typeof error === "object" && error !== null && "code" in error
+          ? formatDatabaseError(error, `Failed to update ${type} settings`)
+          : formatUploadError(error);
       console.error(`Upload failed for ${type}:`, error);
       showNotice(actionableError, true);
     } finally {
@@ -460,6 +592,11 @@ export default function AdminPage() {
     event.preventDefault();
     if (!photoFile) {
       showNotice("Choose an image first.", true);
+      return;
+    }
+    const validation = validateMediaFile("photos", photoFile);
+    if (!validation.valid) {
+      showNotice(validation.error || "Invalid photo file.", true);
       return;
     }
     const derivedTitle =
@@ -484,7 +621,10 @@ export default function AdminPage() {
       setPhotographer("");
       showNotice("Memory uploaded and added to 3D gallery.", false);
     } catch (error) {
-      const actionableError = formatUploadError(error);
+      const actionableError =
+        typeof error === "object" && error !== null && "code" in error
+          ? formatDatabaseError(error, "Failed to save photo record")
+          : formatUploadError(error);
       console.error("Photo upload error:", error);
       showNotice(actionableError, true);
     } finally {
@@ -499,16 +639,35 @@ export default function AdminPage() {
       setPhotos((current) => current.filter((photo) => photo.id !== id));
       showNotice("Memory deleted.", false);
     } catch (error) {
-      const actionableError = formatUploadError(error);
-      console.error("Delete error:", error);
-      showNotice(actionableError, true);
+      showNotice(
+        formatDatabaseError(error, "Unable to delete gallery photo"),
+        true,
+      );
     } finally {
       setBusy("");
     }
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.warn("SignOut error:", err);
+    }
+    try {
+      for (const key of Object.keys(window.localStorage)) {
+        if (key.startsWith("sb-") || key.includes("supabase.auth")) {
+          window.localStorage.removeItem(key);
+        }
+      }
+      for (const key of Object.keys(window.sessionStorage)) {
+        if (key.startsWith("sb-") || key.includes("supabase.auth")) {
+          window.sessionStorage.removeItem(key);
+        }
+      }
+    } catch {
+      // ignore
+    }
     navigate("/admin/login", { replace: true });
   };
 
